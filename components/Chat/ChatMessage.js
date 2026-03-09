@@ -231,6 +231,12 @@ export default function ChatMessage({ message }) {
     }
   }
 
+  const modelTag = message.model === 'chat'
+    ? { label: '⚡ Quick edit', color: '#a0c4ff' }
+    : message.model === 'reasoner'
+    ? { label: '🧠 Deep thinking', color: '#c4a0ff' }
+    : null;
+
   return (
     <div style={{ marginBottom: '16px' }}>
       <ReasoningBlock reasoning={message.reasoning} />
@@ -248,6 +254,13 @@ export default function ChatMessage({ message }) {
           <span style={{ color: '#858585', fontStyle: 'italic' }}>Thinking…</span>
         )}
         {rendered}
+        {modelTag && (
+          <div style={{ marginTop: '8px', paddingTop: '6px', borderTop: '1px solid #3c3c3c' }}>
+            <span style={{ fontSize: '11px', color: modelTag.color, opacity: 0.7 }}>
+              {modelTag.label}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,7 @@
 export const runtime = 'edge';
 
+import { classifyComplexity } from '../../../lib/classifyComplexity';
+
 const SYSTEM_PROMPT = `You are an AI assistant embedded in a browser-based Next.js editor called WebWeave. Your job is to help users build and modify their Next.js websites.
 
 You are talking to someone who may not know how to code. Explain what you're doing in simple terms.
@@ -22,13 +24,11 @@ Rules:
 function buildMessages({ message, currentFile, currentFileContent, projectStructure, conversationHistory }) {
   const messages = [{ role: 'system', content: SYSTEM_PROMPT }];
 
-  // Add trimmed conversation history (last 10 messages)
   const history = (conversationHistory ?? []).slice(-10);
   for (const msg of history) {
     messages.push({ role: msg.role, content: msg.content });
   }
 
-  // Build the user message with injected context
   let userContent = message;
   if (currentFile || projectStructure) {
     userContent += '\n\n---\nProject context:';
@@ -42,6 +42,33 @@ function buildMessages({ message, currentFile, currentFileContent, projectStruct
 
   messages.push({ role: 'user', content: userContent });
   return messages;
+}
+
+/**
+ * Prepends a meta SSE event to the upstream DeepSeek stream so the client
+ * knows which model was selected before tokens start arriving.
+ */
+function prependMetaEvent(model, upstreamBody) {
+  const encoder = new TextEncoder();
+  const metaChunk = encoder.encode(`data: ${JSON.stringify({ type: 'meta', model })}\n\n`);
+  const reader = upstreamBody.getReader();
+
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(metaChunk);
+    },
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        controller.close();
+      } else {
+        controller.enqueue(value);
+      }
+    },
+    cancel() {
+      reader.cancel();
+    },
+  });
 }
 
 export async function POST(req) {
@@ -63,6 +90,11 @@ export async function POST(req) {
     });
   }
 
+  // Step 1: classify — fast, non-streaming, uses only the raw user message
+  const complexity = await classifyComplexity(body.message, apiKey);
+  const model = complexity === 'SIMPLE' ? 'deepseek-chat' : 'deepseek-reasoner';
+
+  // Step 2: stream from the chosen model
   const deepseekRes = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
     headers: {
@@ -70,7 +102,7 @@ export async function POST(req) {
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'deepseek-reasoner',
+      model,
       messages: buildMessages(body),
       stream: true,
     }),
@@ -84,8 +116,7 @@ export async function POST(req) {
     });
   }
 
-  // Forward the SSE stream directly to the client
-  return new Response(deepseekRes.body, {
+  return new Response(prependMetaEvent(model, deepseekRes.body), {
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',

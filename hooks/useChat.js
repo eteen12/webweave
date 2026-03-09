@@ -83,7 +83,7 @@ export function useChat({ currentPath, currentFileContent, fileTree }) {
     setMessages((prev) => [
       ...prev,
       userMessage,
-      { role: 'assistant', content: '', reasoning: '', isPlaceholder: true },
+      { role: 'assistant', content: '', reasoning: '', model: null, isPlaceholder: true },
     ]);
     setChatStatus('thinking');
 
@@ -131,6 +131,7 @@ export function useChat({ currentPath, currentFileContent, fileTree }) {
     let buffer = '';
     let fullContent = '';
     let fullReasoning = '';
+    let selectedModel = null;
 
     try {
       while (true) {
@@ -150,6 +151,21 @@ export function useChat({ currentPath, currentFileContent, fileTree }) {
 
           try {
             const parsed = JSON.parse(data);
+
+            // Meta event — sent before the DeepSeek stream starts
+            if (parsed.type === 'meta') {
+              selectedModel = parsed.model === 'deepseek-chat' ? 'chat' : 'reasoner';
+              setMessages((prev) => {
+                const updated = [...prev];
+                updated[updated.length - 1] = {
+                  ...updated[updated.length - 1],
+                  model: selectedModel,
+                };
+                return updated;
+              });
+              continue;
+            }
+
             const delta = parsed.choices?.[0]?.delta;
             if (!delta) continue;
 
@@ -163,6 +179,7 @@ export function useChat({ currentPath, currentFileContent, fileTree }) {
                 role: 'assistant',
                 content: fullContent,
                 reasoning: fullReasoning,
+                model: selectedModel,
                 isPlaceholder: false,
               };
               return updated;
